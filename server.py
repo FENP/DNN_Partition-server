@@ -5,11 +5,14 @@ import pytorchtool
 
 import pickle
 import torch
+from torchvision import models
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
+
+from dnnpartition import collaborativeIntelligence
 
 class model:
     def __init__(self, model_name, use_gpu=False):
@@ -43,21 +46,23 @@ class CollaborativeIntelligenceHandler(object):
     def initModel(self, name):
         m = model(name)
         m.loadWeight()
-        self._sModel = pytorchtool.Surgery(m.model)
+        self._sModel = pytorchtool.Surgery(m.model, 2)
     def partition(self, layerState):
+        print("服务端获取层状态")
         self._sModel.setLayerState(layerState)
         # print(layerState)
     def inference(self, middleResult):
+        print("服务端获取中间层输入")
         self._sModel.setMiddleResult(
             {k: pickle.loads(v) for k, v in middleResult.items()})
-        return self._sModel(torch.rand(224, 224).unsqueeze_(0))
+        return pickle.dumps(self._sModel(torch.rand(224, 224).unsqueeze_(0)))
 
 def main():
     handler = CollaborativeIntelligenceHandler()
     handler.initModel('alex')
 
     processor = collaborativeIntelligence.Processor(handler)
-    transport = TSocket.TServerSocket(host, port)
+    transport = TSocket.TServerSocket('localhost', 9090)
     tfactory = TTransport.TBufferedTransportFactory()
     pfactory = TBinaryProtocol.TBinaryProtocolFactory()
 
