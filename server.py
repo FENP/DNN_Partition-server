@@ -6,6 +6,7 @@ import pytorchtool
 import pickle
 import torch
 import logging
+import threading
 from torchvision import models
 
 from thrift.transport import TSocket
@@ -52,30 +53,38 @@ class model:
 
         self.model.load_state_dict(state_dict_read, strict=False)
     def loadlayerWeight(self, layerName):
-        if(self.initState[layerName] == False):
+        if(self._initState[layerName] == False):
             # 初始化该层
             self._moduleDict[layerName].load_state_dict(torch.load("../pytorchtool/model_weight/" + 
                 self.model.__class__.__name__ + "/" + layerName + ".pth"), strict=False)
             self._initState[layerName] = True
 
 class CollaborativeIntelligenceHandler(object):
+    def layerInit(self, layerState):
+        for (name, state) in layerState.items():
+            if(state == 2):
+                logging.debug("初始化层: %s", name)
+                self._m.loadlayerWeight(name)
+        print("层初始化结束")
+
     def initModel(self, name):
         m = model(name)
         # m.loadWeight()
+        self._m = m
         self._sModel = pytorchtool.Surgery(m.model, 2)
     def partition(self, layerState):
         print("服务端获取层状态")
         self._sModel.setLayerState(layerState)
-        for (name, state) in layerState.items():
-            if(state == 2):
-                logging.debug("初始化层: %s", name)
-                m.loadlayerWeight(name)
+        self._t = threading.Thread(target=CollaborativeIntelligenceHandler.layerInit, 
+            name='layerInit', args=(self, layerState,))
+        self._t.start()
 
         # print(layerState)
     def inference(self, middleResult):
         print("服务端获取中间层输入")
         self._sModel.setMiddleResult(
             {k: pickle.loads(v) for k, v in middleResult.items()})
+        self._t.join()
         return pickle.dumps(self._sModel(torch.rand(224, 224).unsqueeze_(0)))
 
 def main():
