@@ -33,18 +33,20 @@ class model:
                                     init_weights=False)
             model.eval()
             self.model = model
+            self.depth = 2
         elif self.model_name in 'alexnet':
             self.model_name = 'alexnet'
             self.path = "../pytorchtool/model_weight/alexnet/alexnet-owt-4df8aa71.pth"
             
             model = models.alexnet(False)
             model.eval()
-            self.model = model 
+            self.model = model
+            self.depth = -1 
         else:
             print("Wrong model name")
 
         # 获取模型模块、设置模块初始化状态
-        for layerName, module in pytorchtool.walk_modules(self.model):
+        for layerName, module in pytorchtool.walk_modules(self.model, depth = self.depth):
             self._moduleDict[layerName] = module
             self._initState[layerName] = False
 
@@ -53,11 +55,13 @@ class model:
 
         self.model.load_state_dict(state_dict_read, strict=False)
     def loadlayerWeight(self, layerName):
+        print(layerName)
         if(self._initState[layerName] == False):
             # 初始化该层
             self._moduleDict[layerName].load_state_dict(torch.load("../pytorchtool/model_weight/" + 
                 self.model.__class__.__name__ + "/" + layerName + ".pth"), strict=False)
             self._initState[layerName] = True
+            print(layerName)
 
 class CollaborativeIntelligenceHandler(object):
     def layerInit(self, layerState):
@@ -71,7 +75,7 @@ class CollaborativeIntelligenceHandler(object):
         m = model(name)
         # m.loadWeight()
         self._m = m
-        self._sModel = pytorchtool.Surgery(m.model, 2)
+        self._sModel = pytorchtool.Surgery(m.model, 2, depth = m.depth)
     def partition(self, layerState):
         print("服务端获取层状态")
         self._sModel.setLayerState(layerState)
@@ -89,7 +93,7 @@ class CollaborativeIntelligenceHandler(object):
 
 def main():
     handler = CollaborativeIntelligenceHandler()
-    handler.initModel('alex')
+    handler.initModel('in')
 
     processor = collaborativeIntelligence.Processor(handler)
     transport = TSocket.TServerSocket('localhost', 9090)
