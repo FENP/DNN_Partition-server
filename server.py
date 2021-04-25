@@ -96,7 +96,7 @@ def main():
     handler.initModel('in')
 
     processor = collaborativeIntelligence.Processor(handler)
-    transport = TSocket.TServerSocket('localhost', 9090)
+    transport = TSocket.TServerSocket('192.168.1.16', 9090)
     tfactory = TTransport.TBufferedTransportFactory()
     pfactory = TBinaryProtocol.TBinaryProtocolFactory()
 
