@@ -101,13 +101,13 @@ class CollaborativeIntelligenceHandler(object):
         self._sModel.setMiddleResult(
             {k: pickle.loads(v).cuda() if self._m.use_gpu else pickle.loads(v) for k, v in middleResult.items()})
         self._t.join()
-        return pickle.dumps(self._sModel(torch.rand(224, 224).unsqueeze_(0)).cpu())
+        return pickle.dumps(self._sModel(torch.rand(224, 224).unsqueeze_(0)))
 
 def main():
     # 启动服务前进行一次GPU推理完成CUDA初始化以降低第一次推理的时间
     m = model('in', use_gpu=True)
     m.loadWeight()
-    m.inference()
+    output = m.inference()
     # start  = time.time()
     # m.inference()
     # print(time.time() - start)
