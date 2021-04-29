@@ -48,7 +48,7 @@ class model:
             self.model = model
             self.depth = -1 
         else:
-            print("Wrong model name")
+            raise RuntimeError("Wrong model name")
 
         if self.use_gpu:
             self.model = self.model.to(0)
@@ -80,6 +80,7 @@ class CollaborativeIntelligenceHandler(object):
             if(state == 2):
                 logging.debug("初始化层: %s", name)
                 self._m.loadlayerWeight(name)
+                # self._sModel2.loadLayer(name)
         print("层初始化结束")
 
     def initModel(self, name, use_gpu=False):
@@ -87,6 +88,12 @@ class CollaborativeIntelligenceHandler(object):
         # m.loadWeight()
         self._m = m
         self._sModel = pytorchtool.Surgery(m.model, 2, depth = m.depth)
+        if name in 'alexnet':
+            self._sModel2 = pytorchtool.Surgery2(name, "../pytorchtool/parameters/alexnet/dag")
+        elif name in 'inception':
+            self._sModel2 = pytorchtool.Surgery2(name, "../pytorchtool/parameters/inception/dag")
+        else:
+            raise RuntimeError("Wrong model name")
 
     def partition(self, layerState):
         print("服务端获取层状态")
@@ -98,14 +105,16 @@ class CollaborativeIntelligenceHandler(object):
         # print(layerState)
     def inference(self, middleResult):
         print("服务端获取中间层输入")
-        self._sModel.setMiddleResult(
-            {k: pickle.loads(v).cuda() if self._m.use_gpu else pickle.loads(v) for k, v in middleResult.items()})
+        middleResult = {k: pickle.loads(v).cuda() if self._m.use_gpu 
+            else pickle.loads(v) for k, v in middleResult.items()}
+        self._sModel.setMiddleResult(middleResult)
         self._t.join()
+        # return pickle.dumps(self._sModel2.inferencePart(middleResult))
         return pickle.dumps(self._sModel(torch.rand(224, 224).unsqueeze_(0)))
 
 def main():
     # 启动服务前进行一次GPU推理完成CUDA初始化以降低第一次推理的时间
-    m = model('in', use_gpu=True)
+    m = model('al', use_gpu=True)
     m.loadWeight()
     output = m.inference()
     # start  = time.time()
@@ -113,7 +122,7 @@ def main():
     # print(time.time() - start)
 
     handler = CollaborativeIntelligenceHandler()
-    handler.initModel('alex', use_gpu=True)
+    handler.initModel('al', use_gpu=True)
 
     processor = collaborativeIntelligence.Processor(handler)
     transport = TSocket.TServerSocket('192.168.1.121', 9090)
