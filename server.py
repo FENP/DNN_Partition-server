@@ -4,12 +4,14 @@ sys.path.append('..')
 import pytorchtool
 
 import os
+import io
 import time
 import pickle
 import torch
 import logging
 import threading
-from torchvision import models
+from PIL import Image
+from torchvision import models, transforms
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
@@ -19,6 +21,22 @@ from thrift.server import TServer
 from dnnpartition import collaborativeIntelligence
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+def trans(img):
+    norm_mean = [0.485, 0.456, 0.406]
+    norm_std = [0.229, 0.224, 0.225]
+    inference_transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(norm_mean, norm_std),
+    ])
+
+    # 转换为tensor
+    img_tensor = inference_transform(Image.open(io.BytesIO(img)))
+    img_tensor.unsqueeze_(0)        # chw --> bchw
+    
+    return img_tensor
 
 class model:
     def __init__(self, model_name, use_gpu=False):
@@ -69,6 +87,7 @@ class model:
 
     def loadlayerWeight(self, layerName):
         if(self._initState[layerName] == False):
+            logging.debug("初始化层: %s", layerName)
             # 初始化该层
             self._moduleDict[layerName].load_state_dict(torch.load("../pytorchtool/model_weight/" + 
                 self.model.__class__.__name__ + "/" + layerName + ".pth"), strict=False)
@@ -78,26 +97,28 @@ class CollaborativeIntelligenceHandler(object):
     def layerInit(self, layerState):
         for (name, state) in layerState.items():
             if(state == 2):
-                logging.debug("初始化层: %s", name)
-                self._m.loadlayerWeight(name)
-                # self._sModel2.loadLayer(name)
+                # self._m.loadlayerWeight(name)
+                self._sModel2.loadLayer(name)
         print("层初始化结束")
 
     def initModel(self, name, use_gpu=False):
-        m = model(name, use_gpu=use_gpu)
+        self.use_gpu = use_gpu
+        # m = model(name, use_gpu=use_gpu)
         # m.loadWeight()
-        self._m = m
-        self._sModel = pytorchtool.Surgery(m.model, 2, depth = m.depth)
+        # self._m = m
+        # self._sModel = pytorchtool.Surgery(m.model, 2, depth = m.depth)
         if name in 'alexnet':
             self._sModel2 = pytorchtool.Surgery2(name, "../pytorchtool/parameters/alexnet/dag")
         elif name in 'inception':
             self._sModel2 = pytorchtool.Surgery2(name, "../pytorchtool/parameters/inception/dag")
+        elif name in 'resnet':
+            self._sModel2 = pytorchtool.Surgery2(name, "../pytorchtool/parameters/resnet/dag")
         else:
             raise RuntimeError("Wrong model name")
 
     def partition(self, layerState):
         print("服务端获取层状态")
-        self._sModel.setLayerState(layerState)
+        # self._sModel.setLayerState(layerState)
         self._t = threading.Thread(target=CollaborativeIntelligenceHandler.layerInit, 
             name='layerInit', args=(self, layerState,))
         self._t.start()
@@ -105,24 +126,26 @@ class CollaborativeIntelligenceHandler(object):
         # print(layerState)
     def inference(self, middleResult):
         print("服务端获取中间层输入")
-        middleResult = {k: pickle.loads(v).cuda() if self._m.use_gpu 
-            else pickle.loads(v) for k, v in middleResult.items()}
-        self._sModel.setMiddleResult(middleResult)
+        middleResult = {k: pickle.loads(v) for k, v in middleResult.items()}
+        if 'input' in middleResult:
+            middleResult['input'] = trans(middleResult['input'])
+        middleResult = {k: v.cuda() if self.use_gpu 
+            else v.cpu() for k, v in middleResult.items()}
+        # self._sModel.setMiddleResult(middleResult)
         self._t.join()
-        # return pickle.dumps(self._sModel2.inferencePart(middleResult))
-        return pickle.dumps(self._sModel(torch.rand(224, 224).unsqueeze_(0)))
+        out = pickle.dumps(self._sModel2.inferencePart(middleResult))
+        return out 
+        # return pickle.dumps(self._sModel(torch.rand(224, 224).unsqueeze_(0)))
 
 def main():
     # 启动服务前进行一次GPU推理完成CUDA初始化以降低第一次推理的时间
-    m = model('al', use_gpu=True)
+    m = model('in', use_gpu=True)
     m.loadWeight()
     output = m.inference()
-    # start  = time.time()
-    # m.inference()
-    # print(time.time() - start)
+    print(output)
 
     handler = CollaborativeIntelligenceHandler()
-    handler.initModel('al', use_gpu=True)
+    handler.initModel('res', use_gpu=True)
 
     processor = collaborativeIntelligence.Processor(handler)
     transport = TSocket.TServerSocket('192.168.1.121', 9090)
